@@ -1,0 +1,7 @@
+gram_seva.db
+uploads/*
+!uploads/.gitkeep
+__pycache__/
+*.pyc
+temp_audio.mp3
+.env

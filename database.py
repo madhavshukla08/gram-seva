@@ -74,7 +74,7 @@ def create_complaint(**kwargs):
             (id, village, ward, category, urgency, summary, original_text,
              citizen_name, citizen_phone, latitude, longitude, photo_path, video_path,
              status, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             cid, kwargs.get("village"), kwargs.get("ward"),
             kwargs.get("category"), kwargs.get("urgency"), kwargs.get("summary"),

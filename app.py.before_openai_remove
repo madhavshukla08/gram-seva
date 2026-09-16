@@ -1,5 +1,4 @@
 import streamlit as st
-from audio_recorder_streamlit import audio_recorder
 from faster_whisper import WhisperModel
 from openai import OpenAI
 import os
@@ -186,17 +185,14 @@ if page == "📝 शिकायत दर्ज करें":
     complaint_text = st.text_area("📝 या अपनी शिकायत यहाँ लिखें", placeholder="उदाहरण: हमारे गाँव में 3 दिन से पानी नहीं आ रहा है।")
     st.caption("नीचे रिकॉर्ड बटन दबाएँ और अपनी शिकायत अपने शब्दों में बोलें।")
 
-    audio_bytes = audio_recorder(
-        text="🎙️ रिकॉर्डिंग शुरू करने के लिए क्लिक करें",
-        recording_color="#e63946",
-        neutral_color="#6c757d",
-        icon_name="microphone",
-        icon_size="2x",
-    )
+    audio_file = st.audio_input("🎙️ अपनी शिकायत रिकॉर्ड करें")
 
-    if audio_bytes:
+    audio_bytes = None
+
+    if audio_file is not None:
+        audio_bytes = audio_file.getvalue()
         st.success("✅ आपकी आवाज़ रिकॉर्ड हो गई है।")
-        st.audio(audio_bytes, format="audio/wav")
+        st.audio(audio_file)
     photo_file = st.file_uploader("📸 फ़ोटो सबूत (वैकल्पिक)", type=["jpg", "jpeg", "png"])
     video_file = st.file_uploader("🎥 वीडियो सबूत (वैकल्पिक)", type=["mp4", "mov"])
 

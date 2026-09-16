@@ -1,6 +1,6 @@
 import streamlit as st
-from audio_recorder_streamlit import audio_recorder
-from openai import OpenAI
+import re
+from faster_whisper import WhisperModel
 import os
 import json
 import io
@@ -21,7 +21,7 @@ import plotly.express as px
 # ============================================================
 # CONFIG (env vars) — see README.md
 # ============================================================
-client = OpenAI()
+whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
 db.init_db()
 auth.seed_default_admin()
 
@@ -29,6 +29,59 @@ st.set_page_config(page_title="ग्राम सेवा पोर्टल",
 
 ASSETS_DIR, UPLOADS_DIR = "assets", "uploads"
 os.makedirs(UPLOADS_DIR, exist_ok=True)
+
+
+
+def extract_basic_details(text):
+    """Free local extraction of name, village and ward from Hindi/Roman-Hindi text."""
+    import re
+
+    result = {
+        "name": "",
+        "village": "",
+        "ward": "",
+    }
+
+    # Hindi + Roman Hindi name patterns
+    name_patterns = [
+        r"(?:मेरा नाम|नाम है)\s*[:\-]?\s*([^\n,।]+?)(?=\s+(?:है|हूँ|गाँव|गांव|ग्राम|वार्ड)|[।,\n]|$)",
+        r"(?:my name is|my name)\s*[:\-]?\s*([^\n,.]+?)(?=\s+(?:is|and|village|gau|gaon|ward|baud)|[.,\n]|$)",
+        r"(?:we are nam|naam|name)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)",
+    ]
+
+    for pattern in name_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result["name"] = match.group(1).strip()
+            break
+
+    # Hindi + Roman Hindi village patterns
+    village_patterns = [
+        r"(?:गाँव|गांव|ग्राम)\s*(?:का नाम)?\s*[:\-]?\s*([^\s,।]+)",
+        r"(?:gau|gaon|gram|village)\s+(?:ka naam\s+)?([A-Za-z]+)",
+    ]
+
+    for pattern in village_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            village = match.group(1).strip()
+            if village.lower() not in ["hai", "is", "ka", "ki", "ke"]:
+                result["village"] = village
+                break
+
+    # Hindi + Roman Hindi ward patterns
+    ward_patterns = [
+        r"(?:वार्ड|वॉर्ड)\s*(?:नंबर|नं\.?|संख्या)?\s*[:\-]?\s*(\d+)",
+        r"(?:ward|baud|board)\s*(?:number|no\.?|num)?\s*[:\-]?\s*(\d+)",
+    ]
+
+    for pattern in ward_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            result["ward"] = match.group(1)
+            break
+
+    return result
 
 
 def asset(name):
@@ -133,17 +186,14 @@ if page == "📝 शिकायत दर्ज करें":
     complaint_text = st.text_area("📝 या अपनी शिकायत यहाँ लिखें", placeholder="उदाहरण: हमारे गाँव में 3 दिन से पानी नहीं आ रहा है।")
     st.caption("नीचे रिकॉर्ड बटन दबाएँ और अपनी शिकायत अपने शब्दों में बोलें।")
 
-    audio_bytes = audio_recorder(
-        text="🎙️ रिकॉर्डिंग शुरू करने के लिए क्लिक करें",
-        recording_color="#e63946",
-        neutral_color="#6c757d",
-        icon_name="microphone",
-        icon_size="2x",
-    )
+    audio_file = st.audio_input("🎙️ अपनी शिकायत रिकॉर्ड करें")
 
-    if audio_bytes:
+    audio_bytes = None
+
+    if audio_file is not None:
+        audio_bytes = audio_file.getvalue()
         st.success("✅ आपकी आवाज़ रिकॉर्ड हो गई है।")
-        st.audio(audio_bytes, format="audio/wav")
+        st.audio(audio_file)
     photo_file = st.file_uploader("📸 फ़ोटो सबूत (वैकल्पिक)", type=["jpg", "jpeg", "png"])
     video_file = st.file_uploader("🎥 वीडियो सबूत (वैकल्पिक)", type=["mp4", "mov"])
 
@@ -151,18 +201,26 @@ if page == "📝 शिकायत दर्ज करें":
         with st.spinner("🤖 AI शिकायत को समझ रहा है..."):
 
             if audio_bytes:
+                st.write("🔊 Audio bytes:", len(audio_bytes))
+
                 with open("temp_audio.wav", "wb") as f:
                     f.write(audio_bytes)
 
-                with open("temp_audio.wav", "rb") as audio:
-                    transcription = client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=audio,
-                        language="hi"
-                    )
+                st.audio("temp_audio.wav", format="audio/wav")
 
-                user_text = transcription.text
+                segments, info = whisper_model.transcribe(
+                    "temp_audio.wav",
+                    language="hi",
+                    task="transcribe",
+                    beam_size=5,
+                    vad_filter=True
+                )
+
+                user_text = " ".join(
+                    segment.text for segment in segments
+                ).strip()
                 st.success(f"🎤 **पहचाना गया टेक्स्ट:** {user_text}")
+                st.write("🔎 Debug transcription:", repr(user_text))
             else:
                 user_text = complaint_text.strip()
                 st.success(f"📝 **आपकी शिकायत:** {user_text}")
@@ -192,12 +250,39 @@ if page == "📝 शिकायत दर्ज करें":
             - category और urgency हमेशा दिए गए विकल्पों में से चुनें।
             - केवल valid JSON दें, कोई अतिरिक्त text नहीं।
             """
-            response = client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[{"role": "user", "content": prompt}],
-                response_format={"type": "json_object"},
-            )
-            ai = json.loads(response.choices[0].message.content)
+            # 🆓 Free local Auto-Fill (no OpenAI API required)
+            text_lower = user_text.lower()
+
+            if any(x in text_lower for x in ["पानी", "जल", "नल", "water"]):
+                category = "Water Supply"
+            elif any(x in text_lower for x in ["बिजली", "लाइट", "करंट", "electricity"]):
+                category = "Electricity"
+            elif any(x in text_lower for x in ["सड़क", "रोड", "गड्ढा", "road"]):
+                category = "Roads & Infrastructure"
+            elif any(x in text_lower for x in ["कचरा", "नाली", "सफाई", "शौचालय", "sanitation"]):
+                category = "Sanitation"
+            else:
+                category = "Others"
+
+            if any(x in text_lower for x in ["तुरंत", "बहुत जरूरी", "आपात", "आपातकाल", "3 दिन", "4 दिन", "5 दिन"]):
+                urgency = "High"
+            elif any(x in text_lower for x in ["जल्दी", "जरूरी", "समस्या"]):
+                urgency = "Medium"
+            else:
+                urgency = "Low"
+
+            # 🎯 Free local extraction: Name + Village + Ward
+            basic_details = extract_basic_details(user_text)
+
+            ai = {
+                "name": basic_details.get("name", ""),
+                "village": basic_details.get("village", "") or village_name or "",
+                "ward": basic_details.get("ward", "") or ward or "",
+                "category": category,
+                "urgency": urgency,
+                "summary_hindi": user_text[:150],
+                "complaint": user_text,
+            }
 
             # 🤖 AI Auto-Fill Preview
             st.subheader("🤖 AI द्वारा समझी गई जानकारी")

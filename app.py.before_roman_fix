@@ -1,7 +1,6 @@
 import streamlit as st
-from audio_recorder_streamlit import audio_recorder
+import re
 from faster_whisper import WhisperModel
-from openai import OpenAI
 import os
 import json
 import io
@@ -22,7 +21,6 @@ import plotly.express as px
 # ============================================================
 # CONFIG (env vars) — see README.md
 # ============================================================
-client = OpenAI()
 whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
 db.init_db()
 auth.seed_default_admin()
@@ -36,53 +34,49 @@ os.makedirs(UPLOADS_DIR, exist_ok=True)
 
 def extract_basic_details(text):
     """Free local extraction of name, village and ward from Hindi complaint text."""
-    import re
-
     result = {
         "name": "",
         "village": "",
         "ward": "",
     }
 
-    # Name patterns
+    # Name
     name_patterns = [
-        r"(?:मेरा नाम|नाम है|मैं)\s+([^\s,।]+)",
+        r"(?:मेरा नाम|मेरा नाम है|नाम है)\s*[:\-]?\s*([^\n,।]+?)(?=\s+(?:है|हूँ|और|गाँव|गांव|ग्राम|वार्ड)|[।,\n]|$)",
     ]
 
     for pattern in name_patterns:
-        match = re.search(pattern, text)
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
-            name = match.group(1).strip()
-            if name not in ["हूँ", "है", "रहता", "रहती", "एक"]:
-                result["name"] = name
+            result["name"] = match.group(1).strip()
+            break
+
+    # Village
+    village_patterns = [
+        r"(?:गाँव|गांव|ग्राम)\s*(?:का नाम)?\s*[:\-]?\s*([^\s,।]+)",
+    ]
+
+    for pattern in village_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            village = match.group(1).strip()
+            if village not in ["में", "का", "की", "के", "है"]:
+                result["village"] = village
                 break
 
-    # Ward patterns
+    # Ward
     ward_patterns = [
         r"(?:वार्ड|वॉर्ड)\s*(?:नंबर|नं\.?|संख्या)?\s*[:\-]?\s*(\d+)",
     ]
 
-    match = None
     for pattern in ward_patterns:
-        match = re.search(pattern, text)
+        match = re.search(pattern, text, re.IGNORECASE)
         if match:
             result["ward"] = match.group(1)
             break
 
-    # Village patterns
-    village_patterns = [
-        r"(?:गाँव|गांव|ग्राम)\s+(?:का नाम\s+)?([^\s,।]+)",
-    ]
-
-    for pattern in village_patterns:
-        match = re.search(pattern, text)
-        if match:
-            village = match.group(1).strip()
-            if village not in ["में", "का", "की", "के"]:
-                result["village"] = village
-                break
-
     return result
+
 
 def asset(name):
     p = os.path.join(ASSETS_DIR, name)
@@ -186,17 +180,14 @@ if page == "📝 शिकायत दर्ज करें":
     complaint_text = st.text_area("📝 या अपनी शिकायत यहाँ लिखें", placeholder="उदाहरण: हमारे गाँव में 3 दिन से पानी नहीं आ रहा है।")
     st.caption("नीचे रिकॉर्ड बटन दबाएँ और अपनी शिकायत अपने शब्दों में बोलें।")
 
-    audio_bytes = audio_recorder(
-        text="🎙️ रिकॉर्डिंग शुरू करने के लिए क्लिक करें",
-        recording_color="#e63946",
-        neutral_color="#6c757d",
-        icon_name="microphone",
-        icon_size="2x",
-    )
+    audio_file = st.audio_input("🎙️ अपनी शिकायत रिकॉर्ड करें")
 
-    if audio_bytes:
+    audio_bytes = None
+
+    if audio_file is not None:
+        audio_bytes = audio_file.getvalue()
         st.success("✅ आपकी आवाज़ रिकॉर्ड हो गई है।")
-        st.audio(audio_bytes, format="audio/wav")
+        st.audio(audio_file)
     photo_file = st.file_uploader("📸 फ़ोटो सबूत (वैकल्पिक)", type=["jpg", "jpeg", "png"])
     video_file = st.file_uploader("🎥 वीडियो सबूत (वैकल्पिक)", type=["mp4", "mov"])
 
@@ -213,7 +204,10 @@ if page == "📝 शिकायत दर्ज करें":
 
                 segments, info = whisper_model.transcribe(
                     "temp_audio.wav",
-                    language="hi"
+                    language="hi",
+                    task="transcribe",
+                    beam_size=5,
+                    vad_filter=True
                 )
 
                 user_text = " ".join(

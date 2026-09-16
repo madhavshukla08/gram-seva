@@ -397,15 +397,91 @@ elif page == "🔐 Admin / Officer Login":
     if not st.session_state.user:
         st.header("🔐 Admin / Officer Login")
         st.caption("डिफ़ॉल्ट admin: username `admin`, password `admin123` — पहली बार लॉगिन के बाद बदलें।")
-        u = st.text_input("Username")
-        p = st.text_input("Password", type="password")
-        if st.button("Login"):
+        u = st.text_input("Username", key="login_username")
+        p = st.text_input("Password", type="password", key="login_password")
+
+        col_login, col_forgot = st.columns(2)
+
+        with col_login:
+            login_clicked = st.button("Login", type="primary")
+
+        with col_forgot:
+            forgot_clicked = st.button("🔑 Forgot Password?")
+
+        if login_clicked:
             user = auth.authenticate(u, p)
             if user:
                 st.session_state.user = user
                 st.rerun()
             else:
                 st.error("गलत username या password।")
+
+        if forgot_clicked:
+            st.session_state.show_forgot_password = True
+
+        if st.session_state.get("show_forgot_password", False):
+            st.divider()
+            st.subheader("🔑 Forgot Password")
+
+            identifier = st.text_input(
+                "Username या Registered Email",
+                key="forgot_identifier"
+            )
+
+            if st.button("📩 Send OTP", key="send_reset_otp"):
+                if not identifier.strip():
+                    st.warning("Username या email डालें।")
+                else:
+                    try:
+                        ok, message = auth.request_password_reset(identifier)
+
+                        if ok:
+                            st.session_state.reset_otp_sent = True
+                            st.success(message)
+                        else:
+                            st.error(message)
+
+                    except Exception as e:
+                        st.error(f"OTP भेजने में समस्या: {e}")
+
+            if st.session_state.get("reset_otp_sent", False):
+                otp = st.text_input(
+                    "🔢 6-Digit OTP",
+                    max_chars=6,
+                    key="reset_otp"
+                )
+
+                new_password = st.text_input(
+                    "🔐 New Password",
+                    type="password",
+                    key="reset_new_password"
+                )
+
+                confirm_password = st.text_input(
+                    "🔐 Confirm New Password",
+                    type="password",
+                    key="reset_confirm_password"
+                )
+
+                if st.button("✅ Reset Password", key="reset_password"):
+                    if new_password != confirm_password:
+                        st.error("दोनों passwords समान होने चाहिए।")
+                    elif len(new_password) < 8:
+                        st.error("Password कम से कम 8 characters का होना चाहिए।")
+                    else:
+                        ok, message = auth.reset_password(
+                            st.session_state.get("forgot_identifier", ""),
+                            otp,
+                            new_password
+                        )
+
+                        if ok:
+                            st.success(message)
+                            st.session_state.show_forgot_password = False
+                            st.session_state.reset_otp_sent = False
+                            st.info("अब नए password से Login करें।")
+                        else:
+                            st.error(message)
     else:
         user = st.session_state.user
         topc1, topc2 = st.columns([5, 1])

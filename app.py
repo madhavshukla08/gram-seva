@@ -492,6 +492,37 @@ elif page == "🔐 Admin / Officer Login":
                 st.session_state.user = None
                 st.rerun()
 
+        # =========================
+        # ADMIN EMAIL SETTINGS
+        # =========================
+        if user["role"] == "admin":
+            with st.expander("⚙️ Admin Email Settings"):
+                current_user = auth.get_user(user["username"])
+                current_email = (
+                    current_user["email"]
+                    if current_user and current_user["email"]
+                    else ""
+                )
+
+                st.caption("Forgot Password OTP इसी registered email पर भेजा जाएगा।")
+
+                new_email = st.text_input(
+                    "📧 Registered Email",
+                    value=current_email,
+                    key="admin_email_setting"
+                )
+
+                if st.button("💾 Save Email", key="save_admin_email"):
+                    new_email = new_email.strip()
+
+                    try:
+                        auth.set_email(user["username"], new_email)
+                        st.success("✅ Admin email successfully updated.")
+                    except ValueError as e:
+                        st.error(str(e))
+                    except Exception as e:
+                        st.error(f"Email save करने में समस्या: {e}")
+
         tab_list, tab_analytics = st.tabs(["📋 शिकायतें", "📊 Analytics"])
 
         with tab_list:

@@ -4,3 +4,4 @@ twilio
 plotly
 streamlit-geolocation
 audio-recorder-streamlit==0.0.10
+faster-whisper==1.2.1

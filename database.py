@@ -34,6 +34,7 @@ def init_db():
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL,          -- 'admin' or 'officer'
                 phone TEXT,
+                email TEXT,
                 created_at TEXT NOT NULL
             )
         """)
@@ -48,6 +49,7 @@ def init_db():
                 original_text TEXT,
                 citizen_name TEXT,
                 citizen_phone TEXT,
+                email TEXT,
                 latitude REAL,
                 longitude REAL,
                 photo_path TEXT,

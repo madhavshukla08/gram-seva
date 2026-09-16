@@ -3,3 +3,4 @@ openai
 twilio
 plotly
 streamlit-geolocation
+audio-recorder-streamlit==0.0.10

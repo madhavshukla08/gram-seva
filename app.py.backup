@@ -1,9 +1,7 @@
 import streamlit as st
-from audio_recorder_streamlit import audio_recorder
 from openai import OpenAI
 import os
 import json
-import io
 from datetime import datetime
 
 import database as db
@@ -129,68 +127,27 @@ if page == "📝 शिकायत दर्ज करें":
             if lat and lon:
                 st.session_state.gps = {"lat": lat, "lon": lon}
 
-    st.subheader("🎤 अपनी शिकायत बोलकर दर्ज करें")
-    complaint_text = st.text_area("📝 या अपनी शिकायत यहाँ लिखें", placeholder="उदाहरण: हमारे गाँव में 3 दिन से पानी नहीं आ रहा है।")
-    st.caption("नीचे रिकॉर्ड बटन दबाएँ और अपनी शिकायत अपने शब्दों में बोलें।")
-
-    audio_bytes = audio_recorder(
-        text="🎙️ रिकॉर्डिंग शुरू करने के लिए क्लिक करें",
-        recording_color="#e63946",
-        neutral_color="#6c757d",
-        icon_name="microphone",
-        icon_size="2x",
-    )
-
-    if audio_bytes:
-        st.success("✅ आपकी आवाज़ रिकॉर्ड हो गई है।")
-        st.audio(audio_bytes, format="audio/wav")
+    audio_file = st.file_uploader("🎤 ऑडियो शिकायत (.mp3/.wav/.m4a)", type=["mp3", "wav", "m4a"])
     photo_file = st.file_uploader("📸 फ़ोटो सबूत (वैकल्पिक)", type=["jpg", "jpeg", "png"])
     video_file = st.file_uploader("🎥 वीडियो सबूत (वैकल्पिक)", type=["mp4", "mov"])
 
-    if st.button("📤 शिकायत दर्ज करें", type="primary") and (audio_bytes or complaint_text.strip()):
-        with st.spinner("🤖 AI शिकायत को समझ रहा है..."):
-
-            if audio_bytes:
-                with open("temp_audio.wav", "wb") as f:
-                    f.write(audio_bytes)
-
-                with open("temp_audio.wav", "rb") as audio:
-                    transcription = client.audio.transcriptions.create(
-                        model="whisper-1",
-                        file=audio,
-                        language="hi"
-                    )
-
-                user_text = transcription.text
-                st.success(f"🎤 **पहचाना गया टेक्स्ट:** {user_text}")
-            else:
-                user_text = complaint_text.strip()
-                st.success(f"📝 **आपकी शिकायत:** {user_text}")
+    if st.button("📤 शिकायत दर्ज करें", type="primary") and audio_file is not None:
+        with st.spinner("AI आपकी आवाज़ को समझ रहा है..."):
+            with open("temp_audio.mp3", "wb") as f:
+                f.write(audio_file.read())
+            with open("temp_audio.mp3", "rb") as audio:
+                transcription = client.audio.transcriptions.create(model="whisper-1", file=audio, language="hi")
+            user_text = transcription.text
+            st.success(f"**पहचाना गया टेक्स्ट:** {user_text}")
 
             prompt = f"""
-            आप ग्राम सेवा पोर्टल के AI Assistant हैं।
-            ग्रामीण की शिकायत को ध्यान से समझें और उपलब्ध जानकारी को JSON में निकालें।
-
-            शिकायत:
-            "{user_text}"
-
-            JSON में केवल ये 7 Keys दें:
-
-            1. "name" — व्यक्ति का नाम। अगर नाम नहीं बताया गया हो तो "" दें।
-            2. "village" — गाँव का नाम। अगर नहीं बताया गया हो तो "" दें।
-            3. "ward" — वार्ड/मोहल्ला नंबर या नाम। अगर नहीं बताया गया हो तो "" दें।
-            4. "category" — केवल इनमें से एक:
-               "Water Supply", "Electricity", "Roads & Infrastructure", "Sanitation", "Others"
-            5. "urgency" — केवल इनमें से एक:
-               "High", "Medium", "Low"
-            6. "summary_hindi" — शिकायत का छोटा और स्पष्ट हिंदी सारांश।
-            7. "complaint" — शिकायत का पूरा साफ़ किया हुआ विवरण हिंदी में।
-
-            महत्वपूर्ण:
-            - जानकारी अनुमान से न बनाएं।
-            - जो जानकारी शिकायत में नहीं है उसे "" रखें।
-            - category और urgency हमेशा दिए गए विकल्पों में से चुनें।
-            - केवल valid JSON दें, कोई अतिरिक्त text नहीं।
+            नीचे दिए गए ग्रामीण शिकायत टेक्स्ट का विश्लेषण करें और जानकारी को JSON प्रारूप में निकालें।
+            टेक्स्ट: "{user_text}"
+            JSON में केवल ये 3 Keys होनी चाहिए:
+            1. "category" (संभावित वैल्यूज़: "Water Supply", "Electricity", "Roads & Infrastructure", "Sanitation", "Others")
+            2. "urgency" (संभावित वैल्यूज़: "High", "Medium", "Low")
+            3. "summary_hindi" (एक छोटा 1 लाइन का शुद्ध हिंदी सारांश)
+            केवल JSON आउटपुट दें।
             """
             response = client.chat.completions.create(
                 model="gpt-4o-mini",
@@ -198,50 +155,6 @@ if page == "📝 शिकायत दर्ज करें":
                 response_format={"type": "json_object"},
             )
             ai = json.loads(response.choices[0].message.content)
-
-            # 🤖 AI Auto-Fill Preview
-            st.subheader("🤖 AI द्वारा समझी गई जानकारी")
-            st.info("कृपया जानकारी जाँच लें। AI द्वारा निकाली गई जानकारी को submit करने से पहले verify करें।")
-
-            ai_name = st.text_input(
-                "👤 नाम",
-                value=ai.get("name", ""),
-                key="ai_name"
-            )
-            ai_village = st.text_input(
-                "🏠 गाँव",
-                value=ai.get("village", "") or village_name,
-                key="ai_village"
-            )
-            ai_ward = st.text_input(
-                "🔢 वार्ड / मोहल्ला",
-                value=ai.get("ward", "") or ward,
-                key="ai_ward"
-            )
-            ai_category = st.selectbox(
-                "📂 शिकायत की श्रेणी",
-                CATEGORIES,
-                index=CATEGORIES.index(ai.get("category", "Others"))
-                    if ai.get("category", "Others") in CATEGORIES else CATEGORIES.index("Others"),
-                key="ai_category"
-            )
-            ai_urgency = st.selectbox(
-                "🚨 प्राथमिकता",
-                ["High", "Medium", "Low"],
-                index=["High", "Medium", "Low"].index(ai.get("urgency", "Medium"))
-                    if ai.get("urgency", "Medium") in ["High", "Medium", "Low"] else 1,
-                key="ai_urgency"
-            )
-            ai_summary = st.text_input(
-                "📝 हिंदी सारांश",
-                value=ai.get("summary_hindi", ""),
-                key="ai_summary"
-            )
-            ai_complaint = st.text_area(
-                "📄 पूरी शिकायत",
-                value=ai.get("complaint", "") or user_text,
-                key="ai_complaint"
-            )
 
             photo_path = None
             if photo_file:
@@ -255,18 +168,11 @@ if page == "📝 शिकायत दर्ज करें":
                     f.write(video_file.getbuffer())
 
             cid = db.create_complaint(
-                citizen_name=ai_name,
-                village=ai_village,
-                ward=ai_ward,
-                category=ai_category,
-                urgency=ai_urgency,
-                summary=ai_summary,
-                original_text=ai_complaint,
-                citizen_phone=citizen_phone,
-                latitude=st.session_state.gps["lat"],
-                longitude=st.session_state.gps["lon"],
-                photo_path=photo_path,
-                video_path=video_path,
+                village=village_name, ward=ward, category=ai.get("category", "Others"),
+                urgency=ai.get("urgency", "Medium"), summary=ai.get("summary_hindi", ""),
+                original_text=user_text, citizen_phone=citizen_phone,
+                latitude=st.session_state.gps["lat"], longitude=st.session_state.gps["lon"],
+                photo_path=photo_path, video_path=video_path,
             )
 
             st.balloons()

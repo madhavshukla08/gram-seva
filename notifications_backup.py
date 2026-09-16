@@ -68,23 +68,16 @@ def make_voice_call(to_phone, spoken_text):
 
 def notify_admin_new_complaint(admin_phone, complaint, use_sms, use_whatsapp):
     body = (
-        f"🆕 नई शिकायत — {complaint['id']}\n"
-        f"👤 नाम: {complaint.get('citizen_name') or 'नहीं बताया'}\n"
-        f"🏠 गाँव: {complaint['village']}\n"
-        f"🔢 वार्ड: {complaint.get('ward') or 'नहीं बताया'}\n"
-        f"📂 श्रेणी: {complaint['category']}\n"
-        f"🚨 प्राथमिकता: {complaint['urgency']}\n"
-        f"📝 शिकायत: {(complaint['original_text'] or '')[:300]}"
+        f"🆕 नई शिकायत {complaint['id']}\n"
+        f"गाँव: {complaint['village']}\n"
+        f"श्रेणी: {complaint['category']} | प्राथमिकता: {complaint['urgency']}\n"
+        f"विवरण: {(complaint['original_text'] or '')[:120]}"
     )
-
     results = []
-
     if use_sms:
         results.append(send_sms(admin_phone, body))
-
     if use_whatsapp:
         results.append(send_whatsapp(admin_phone, body))
-
     return results
 
 

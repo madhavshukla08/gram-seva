@@ -46,7 +46,6 @@ def init_db():
                 urgency TEXT,
                 summary TEXT,
                 original_text TEXT,
-                citizen_name TEXT,
                 citizen_phone TEXT,
                 latitude REAL,
                 longitude REAL,
@@ -72,13 +71,13 @@ def create_complaint(**kwargs):
         conn.execute("""
             INSERT INTO complaints
             (id, village, ward, category, urgency, summary, original_text,
-             citizen_name, citizen_phone, latitude, longitude, photo_path, video_path,
+             citizen_phone, latitude, longitude, photo_path, video_path,
              status, created_at, updated_at)
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             cid, kwargs.get("village"), kwargs.get("ward"),
             kwargs.get("category"), kwargs.get("urgency"), kwargs.get("summary"),
-            kwargs.get("original_text"), kwargs.get("citizen_name"), kwargs.get("citizen_phone"),
+            kwargs.get("original_text"), kwargs.get("citizen_phone"),
             kwargs.get("latitude"), kwargs.get("longitude"),
             kwargs.get("photo_path"), kwargs.get("video_path"),
             "Submitted", now, now,

@@ -438,3 +438,69 @@ def get_sla_counts():
         counts[state] += 1
 
     return counts
+
+# ================================================================
+# PHASE 1 — Automatic SLA Escalation
+# ================================================================
+
+def auto_escalate_complaints():
+    """
+    Automatically escalate unresolved complaints whose SLA is breached.
+
+    Escalation levels:
+        0 = Normal
+        1 = First escalation
+        2 = Second escalation
+        3 = Final escalation
+    """
+
+    complaints = get_all_complaints()
+    escalated = []
+
+    for complaint in complaints:
+        if complaint.get("status") in ("Resolved", "Closed"):
+            continue
+
+        if get_sla_state(complaint) != "Breached":
+            continue
+
+        current_level = int(complaint.get("escalation_level") or 0)
+
+        if current_level >= 3:
+            continue
+
+        new_level = current_level + 1
+
+        with get_conn() as conn:
+            conn.execute(
+                """
+                UPDATE complaints
+                SET escalation_level = ?,
+                    updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    new_level,
+                    datetime.now().isoformat(timespec="seconds"),
+                    complaint["id"],
+                ),
+            )
+
+        add_complaint_update(
+            complaint["id"],
+            "SLA Escalated",
+            updated_by="system",
+            new_status=complaint["status"],
+            remarks=(
+                f"SLA breached. "
+                f"Escalation Level {current_level} → {new_level}"
+            ),
+        )
+
+        escalated.append({
+            "complaint_id": complaint["id"],
+            "old_level": current_level,
+            "new_level": new_level,
+        })
+
+    return escalated

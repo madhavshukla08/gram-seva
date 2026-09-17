@@ -6,3 +6,4 @@ __pycache__/
 temp_audio.mp3
 .env
 temp_audio.wav
+.env.save

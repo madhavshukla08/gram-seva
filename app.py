@@ -339,27 +339,49 @@ if page == "📝 शिकायत दर्ज करें":
                 with open(video_path, "wb") as f:
                     f.write(video_file.getbuffer())
 
-            cid = db.create_complaint(
-                citizen_name=ai_name,
-                village=ai_village,
-                ward=ai_ward,
-                category=ai_category,
-                urgency=ai_urgency,
-                summary=ai_summary,
-                original_text=ai_complaint,
-                citizen_phone=citizen_phone,
-                latitude=st.session_state.gps["lat"],
-                longitude=st.session_state.gps["lon"],
-                photo_path=photo_path,
-                video_path=video_path,
-            )
+            # Save the verified AI preview in session state.
+            st.session_state["phase1_pending_complaint"] = {
+                "citizen_name": ai_name,
+                "village": ai_village,
+                "ward": ai_ward,
+                "category": ai_category,
+                "urgency": ai_urgency,
+                "summary": ai_summary,
+                "original_text": ai_complaint,
+                "citizen_phone": citizen_phone,
+                "latitude": st.session_state.gps["lat"],
+                "longitude": st.session_state.gps["lon"],
+                "photo_path": photo_path,
+                "video_path": video_path,
+            }
+
+            st.success("✅ जानकारी तैयार है। ऊपर की जानकारी जाँचकर नीचे से अंतिम रूप से शिकायत दर्ज करें।")
+
+    # Final confirmation: database में complaint तभी बनेगी जब citizen confirm करे.
+    pending = st.session_state.get("phase1_pending_complaint")
+
+    if pending:
+        st.divider()
+        st.subheader("✅ अंतिम पुष्टि")
+        st.info("ऊपर दी गई जानकारी सही होने पर नीचे का बटन दबाएँ।")
+
+        if st.button("✅ जानकारी सही है — शिकायत दर्ज करें", type="primary"):
+            with st.spinner("शिकायत दर्ज की जा रही है..."):
+                cid = db.create_complaint(**pending)
+
+                complaint = db.get_complaint(cid)
+                notify.notify_admin_new_complaint(
+                    st.session_state.admin_phone,
+                    complaint,
+                    st.session_state.notify_sms,
+                    st.session_state.notify_whatsapp,
+                )
+
+                st.session_state["phase1_pending_complaint"] = None
 
             st.balloons()
-            st.success(f"शिकायत दर्ज हो गई! आपकी **Complaint ID: {cid}** है — इसे सुरक्षित रखें।")
-            complaint = db.get_complaint(cid)
-            notify.notify_admin_new_complaint(
-                st.session_state.admin_phone, complaint,
-                st.session_state.notify_sms, st.session_state.notify_whatsapp,
+            st.success(
+                f"🎉 शिकायत दर्ज हो गई! आपकी **Complaint ID: {cid}** है — इसे सुरक्षित रखें।"
             )
 
 # =================================================================
@@ -558,20 +580,140 @@ elif page == "🔐 Admin / Officer Login":
                 with st.expander("विवरण / Update status"):
                     st.write(f"**मूल शिकायत:** {c['original_text']}")
                     st.write(f"**सारांश:** {c['summary']}")
+
+                    # =================================================
+                    # PHASE 1 — Department + SLA Information
+                    # =================================================
+                    d1, d2, d3 = st.columns(3)
+
+                    with d1:
+                        st.metric(
+                            "🏢 विभाग",
+                            c.get("department") or "General"
+                        )
+
+                    with d2:
+                        sla_hours = c.get("sla_hours")
+                        st.metric(
+                            "⏱️ SLA",
+                            f"{sla_hours} घंटे" if sla_hours else "N/A"
+                        )
+
+                    with d3:
+                        assigned = c.get("assigned_to")
+                        st.metric(
+                            "👤 Assigned Officer",
+                            assigned or "Not Assigned"
+                        )
+
+                    if c.get("sla_deadline"):
+                        st.info(
+                            f"📅 **SLA Deadline:** {c['sla_deadline']}"
+                        )
+
+                        # =================================================
+                        # PHASE 1 — Live SLA Status
+                        # =================================================
+                        try:
+                            sla_state = db.get_sla_state(c)
+
+                            sla_display = {
+                                "On Track": "🟢 On Track",
+                                "Due Soon": "🟠 Due Soon",
+                                "Breached": "🔴 Breached",
+                                "Completed": "✅ Completed",
+                                "No SLA": "⚪ No SLA",
+                                "Invalid SLA": "⚠️ Invalid SLA",
+                            }.get(
+                                sla_state,
+                                f"⚪ {sla_state}"
+                            )
+
+                            st.markdown(
+                                f"**SLA Status:** {sla_display}"
+                            )
+
+                        except Exception as e:
+                            st.warning(
+                                f"SLA status load नहीं हो सका: {e}"
+                            )
+
                     if c["latitude"] and c["longitude"]:
-                        st.map({"lat": [c["latitude"]], "lon": [c["longitude"]]})
+                        st.map({
+                            "lat": [c["latitude"]],
+                            "lon": [c["longitude"]]
+                        })
+
                     if c["photo_path"] and os.path.exists(c["photo_path"]):
                         st.image(c["photo_path"], width=250)
+
                     if c["video_path"] and os.path.exists(c["video_path"]):
                         st.video(c["video_path"])
 
-                    new_status = st.selectbox("स्थिति बदलें", db.STATUS_FLOW,
-                                               index=db.STATUS_FLOW.index(c["status"]), key=f"status_{c['id']}")
-                    notes = st.text_area("टिप्पणी (citizen को भेजी जाएगी)", value=c["resolution_notes"] or "", key=f"notes_{c['id']}")
-                    if st.button("💾 अपडेट करें व Citizen को Notify करें", key=f"upd_{c['id']}"):
-                        db.update_status(c["id"], new_status, notes, assigned_to=user["username"])
+                    # =================================================
+                    # PHASE 1 — Complaint Timeline
+                    # =================================================
+                    st.markdown("### 🕒 Complaint Timeline")
+
+                    try:
+                        timeline = db.get_complaint_updates(c["id"])
+
+                        if timeline:
+                            for event in timeline:
+                                action = event.get("action") or "Update"
+                                remarks = event.get("remarks") or ""
+                                updated_by = event.get("updated_by") or "system"
+                                event_time = event.get("created_at") or ""
+
+                                st.markdown(
+                                    f"""
+                                    **🔹 {action}**  
+                                    `{event_time}` · 👤 {updated_by}  
+                                    {remarks}
+                                    """
+                                )
+                        else:
+                            st.caption("अभी कोई timeline update नहीं है।")
+
+                    except Exception as e:
+                        st.warning(f"Timeline load नहीं हो सकी: {e}")
+
+                    st.divider()
+
+                    # =================================================
+                    # STATUS UPDATE
+                    # =================================================
+                    new_status = st.selectbox(
+                        "स्थिति बदलें",
+                        db.STATUS_FLOW,
+                        index=db.STATUS_FLOW.index(c["status"]),
+                        key=f"status_{c['id']}"
+                    )
+
+                    notes = st.text_area(
+                        "टिप्पणी (citizen को भेजी जाएगी)",
+                        value=c["resolution_notes"] or "",
+                        key=f"notes_{c['id']}"
+                    )
+
+                    if st.button(
+                        "💾 अपडेट करें व Citizen को Notify करें",
+                        key=f"upd_{c['id']}"
+                    ):
+                        db.update_status(
+                            c["id"],
+                            new_status,
+                            notes,
+                            assigned_to=user["username"]
+                        )
+
                         updated = db.get_complaint(c["id"])
-                        ok, msg = notify.notify_citizen_status_update(c["citizen_phone"], updated)
+
+                        ok, msg = notify.notify_citizen_status_update(
+                            c["citizen_phone"],
+                            updated
+                        )
+
                         st.success("स्थिति अपडेट हो गई।")
                         st.info(msg)
                         st.rerun()

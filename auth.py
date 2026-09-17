@@ -266,9 +266,28 @@ Gram Seva
     return True, "OTP registered email पर भेज दिया गया है।"
 
 
-def reset_password(username, otp, new_password):
+def reset_password(identifier, otp, new_password):
     if len(new_password) < 8:
         return False, "Password कम से कम 8 characters का होना चाहिए।"
+
+    identifier = identifier.strip()
+
+    # Username OR registered email दोनों support करें
+    with get_conn() as conn:
+        user = conn.execute(
+            """
+            SELECT * FROM users
+            WHERE username = ?
+               OR lower(email) = lower(?)
+            LIMIT 1
+            """,
+            (identifier, identifier)
+        ).fetchone()
+
+    if not user:
+        return False, "Username/email नहीं मिला।"
+
+    username = user["username"]
 
     verified = _verify_otp(
         username,

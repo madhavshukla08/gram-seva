@@ -70,21 +70,54 @@ def new_complaint_id():
 def create_complaint(**kwargs):
     cid = new_complaint_id()
     now = datetime.now().isoformat(timespec="seconds")
+
+    urgency = kwargs.get("urgency") or "Medium"
+    department = kwargs.get("department") or "General"
+
+    sla_hours = calculate_sla_hours(urgency)
+    sla_deadline = calculate_sla_deadline(urgency, now)
+
     with get_conn() as conn:
         conn.execute("""
             INSERT INTO complaints
             (id, village, ward, category, urgency, summary, original_text,
              citizen_name, citizen_phone, latitude, longitude, photo_path, video_path,
-             status, created_at, updated_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             status, resolution_notes, assigned_to, created_at, updated_at,
+             department, sla_hours, sla_deadline, resolved_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
-            cid, kwargs.get("village"), kwargs.get("ward"),
-            kwargs.get("category"), kwargs.get("urgency"), kwargs.get("summary"),
-            kwargs.get("original_text"), kwargs.get("citizen_name"), kwargs.get("citizen_phone"),
-            kwargs.get("latitude"), kwargs.get("longitude"),
-            kwargs.get("photo_path"), kwargs.get("video_path"),
-            "Submitted", now, now,
+            cid,
+            kwargs.get("village"),
+            kwargs.get("ward"),
+            kwargs.get("category"),
+            urgency,
+            kwargs.get("summary"),
+            kwargs.get("original_text"),
+            kwargs.get("citizen_name"),
+            kwargs.get("citizen_phone"),
+            kwargs.get("latitude"),
+            kwargs.get("longitude"),
+            kwargs.get("photo_path"),
+            kwargs.get("video_path"),
+            "Submitted",
+            None,
+            kwargs.get("assigned_to"),
+            now,
+            now,
+            department,
+            sla_hours,
+            sla_deadline,
+            None,
         ))
+
+    add_complaint_update(
+        cid,
+        "Complaint Registered",
+        updated_by="system",
+        new_status="Submitted",
+        remarks=f"Department: {department} | SLA: {sla_hours} hours"
+    )
+
     return cid
 
 
@@ -114,13 +147,66 @@ def get_all_complaints(status_filter=None, village_filter=None, urgency_filter=N
 
 def update_status(complaint_id, new_status, notes=None, assigned_to=None):
     now = datetime.now().isoformat(timespec="seconds")
+
+    complaint = get_complaint(complaint_id)
+
+    if not complaint:
+        raise ValueError(f"Complaint not found: {complaint_id}")
+
+    old_status = complaint["status"]
+    old_assigned_to = complaint.get("assigned_to")
+
     with get_conn() as conn:
         conn.execute("""
             UPDATE complaints
-            SET status = ?, resolution_notes = COALESCE(?, resolution_notes),
-                assigned_to = COALESCE(?, assigned_to), updated_at = ?
+            SET status = ?,
+                resolution_notes = COALESCE(?, resolution_notes),
+                assigned_to = COALESCE(?, assigned_to),
+                resolved_at = CASE
+                    WHEN ? IN ("Resolved", "Closed")
+                         AND resolved_at IS NULL
+                    THEN ?
+                    ELSE resolved_at
+                END,
+                updated_at = ?
             WHERE id = ?
-        """, (new_status, notes, assigned_to, now, complaint_id))
+        """, (
+            new_status,
+            notes,
+            assigned_to,
+            new_status,
+            now,
+            now,
+            complaint_id,
+        ))
+
+    if old_status != new_status:
+        add_complaint_update(
+            complaint_id,
+            "Status Changed",
+            updated_by=assigned_to or "officer",
+            old_status=old_status,
+            new_status=new_status,
+            remarks=notes,
+        )
+
+    if assigned_to and assigned_to != old_assigned_to:
+        add_complaint_update(
+            complaint_id,
+            "Officer Assigned",
+            updated_by=assigned_to,
+            new_status=new_status,
+            remarks=f"Assigned to: {assigned_to}",
+        )
+
+    if notes and old_status == new_status:
+        add_complaint_update(
+            complaint_id,
+            "Resolution Note Added",
+            updated_by=assigned_to or "officer",
+            new_status=new_status,
+            remarks=notes,
+        )
 
 
 def get_villages():
@@ -154,3 +240,148 @@ def get_analytics():
         "by_village": [dict(r) for r in by_village],
         "daily": [dict(r) for r in daily],
     }
+
+
+# ================================================================
+# PHASE 1 — Department + SLA + Complaint Timeline
+# ================================================================
+
+def calculate_sla_hours(urgency):
+    """Return SLA duration based on complaint urgency."""
+    return {
+        "High": 24,
+        "Medium": 48,
+        "Low": 72,
+    }.get(urgency, 72)
+
+
+def calculate_sla_deadline(urgency, created_at=None):
+    """Calculate SLA deadline from complaint creation time."""
+    from datetime import timedelta
+
+    if created_at:
+        start = datetime.fromisoformat(created_at)
+    else:
+        start = datetime.now()
+
+    hours = calculate_sla_hours(urgency)
+    return (
+        start + timedelta(hours=hours)
+    ).isoformat(timespec="seconds")
+
+
+def add_complaint_update(
+    complaint_id,
+    action,
+    updated_by=None,
+    old_status=None,
+    new_status=None,
+    remarks=None,
+):
+    """Store a complaint timeline event."""
+
+    now = datetime.now().isoformat(timespec="seconds")
+
+    with get_conn() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS complaint_updates (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                complaint_id TEXT NOT NULL,
+                action TEXT NOT NULL,
+                old_status TEXT,
+                new_status TEXT,
+                remarks TEXT,
+                updated_by TEXT,
+                created_at TEXT NOT NULL
+            )
+        """)
+
+        conn.execute("""
+            INSERT INTO complaint_updates
+            (
+                complaint_id,
+                action,
+                old_status,
+                new_status,
+                remarks,
+                updated_by,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (
+            complaint_id,
+            action,
+            old_status,
+            new_status,
+            remarks,
+            updated_by,
+            now,
+        ))
+
+
+def get_complaint_updates(complaint_id):
+    """Return complete timeline for a complaint."""
+
+    with get_conn() as conn:
+        rows = conn.execute("""
+            SELECT *
+            FROM complaint_updates
+            WHERE complaint_id = ?
+            ORDER BY created_at ASC
+        """, (complaint_id,)).fetchall()
+
+        return [dict(row) for row in rows]
+
+
+def get_sla_state(complaint):
+    """Return current SLA state."""
+
+    deadline = complaint.get("sla_deadline")
+
+    if not deadline:
+        return "No SLA"
+
+    try:
+        deadline_dt = datetime.fromisoformat(deadline)
+    except Exception:
+        return "Invalid SLA"
+
+    now = datetime.now()
+
+    if complaint.get("status") in ("Resolved", "Closed"):
+        return "Completed"
+
+    if now > deadline_dt:
+        return "Breached"
+
+    remaining = deadline_dt - now
+
+    if remaining.total_seconds() <= 6 * 3600:
+        return "Due Soon"
+
+    return "On Track"
+
+
+def get_sla_counts():
+    """Return SLA dashboard counts."""
+
+    complaints = get_all_complaints()
+
+    counts = {
+        "On Track": 0,
+        "Due Soon": 0,
+        "Breached": 0,
+        "Completed": 0,
+        "No SLA": 0,
+        "Invalid SLA": 0,
+    }
+
+    for complaint in complaints:
+        state = get_sla_state(complaint)
+
+        if state not in counts:
+            counts[state] = 0
+
+        counts[state] += 1
+
+    return counts

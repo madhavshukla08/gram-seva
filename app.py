@@ -621,6 +621,26 @@ elif page == "🔐 Admin / Officer Login":
                 )
             )
 
+            # =================================================
+            # PHASE 1 — Escalation Level Breakdown
+            # =================================================
+            e1, e2, e3 = st.columns(3)
+
+            e1.metric(
+                "🚨 Level 1",
+                escalation_counts.get(1, 0)
+            )
+
+            e2.metric(
+                "🔥 Level 2",
+                escalation_counts.get(2, 0)
+            )
+
+            e3.metric(
+                "🛑 Level 3",
+                escalation_counts.get(3, 0)
+            )
+
             st.divider()
 
             for c in complaints:

@@ -772,6 +772,21 @@ elif page == "🔐 Admin / Officer Login":
                         key=f"resolution_photo_{c['id']}"
                     )
 
+                    escalation_level = st.selectbox(
+                        "🚨 Escalation Level",
+                        [0, 1, 2, 3],
+                        index=min(
+                            max(int(c.get("escalation_level") or 0), 0),
+                            3
+                        ),
+                        format_func=lambda x: (
+                            "Level 0 — Normal"
+                            if x == 0 else
+                            f"Level {x} — Escalated"
+                        ),
+                        key=f"escalation_{c['id']}"
+                    )
+
                     if st.button(
                         "💾 अपडेट करें व Citizen को Notify करें",
                         key=f"upd_{c['id']}"
@@ -802,7 +817,8 @@ elif page == "🔐 Admin / Officer Login":
                             notes=notes,
                             assigned_officer=assigned_officer,
                             resolution_remarks=resolution_remarks or None,
-                            resolution_photo=saved_photo
+                            resolution_photo=saved_photo,
+                            escalation_level=escalation_level
                         )
 
                         with db.get_conn() as conn:

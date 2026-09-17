@@ -170,6 +170,7 @@ def update_status(
     assigned_officer=None,
     resolution_remarks=None,
     resolution_photo=None,
+    escalation_level=None,
 ):
     now = datetime.now().isoformat(timespec="seconds")
 
@@ -197,6 +198,7 @@ def update_status(
                 assigned_officer = COALESCE(?, assigned_officer),
                 resolution_remarks = COALESCE(?, resolution_remarks),
                 resolution_photo = COALESCE(?, resolution_photo),
+                escalation_level = COALESCE(?, escalation_level),
                 resolved_at = CASE
                     WHEN ? IN ("Resolved", "Closed")
                          AND resolved_at IS NULL
@@ -212,6 +214,7 @@ def update_status(
             officer,
             resolution_remarks,
             resolution_photo,
+            escalation_level,
             new_status,
             now,
             now,

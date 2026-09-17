@@ -7,3 +7,18 @@ temp_audio.mp3
 .env
 temp_audio.wav
 .env.save
+
+# Local backup files
+*.before_*
+*.backup
+*.phase1_backup
+*.db
+phase1_migrate.py
+
+# Additional local backup files
+*.phase1_*
+*.otp_fix_backup
+*.complaint_backup
+*.complaint_engine_backup
+*.update_status_backup
+e.pypython*

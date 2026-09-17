@@ -558,11 +558,41 @@ elif page == "🔐 Admin / Officer Login":
 
             complaints = db.get_all_complaints(status_f, village_f, urgency_f)
 
+            # =================================================
+            # PHASE 1 — SLA Dashboard Metrics
+            # =================================================
+            sla_counts = db.get_sla_counts()
+
+            pending_count = sum(
+                1 for c in all_complaints
+                if c["status"] not in ("Resolved", "Closed")
+            )
+
             m1, m2, m3, m4 = st.columns(4)
-            m1.metric("कुल", len(all_complaints))
-            m2.metric("Submitted", sum(1 for c in all_complaints if c["status"] == "Submitted"))
-            m3.metric("In Progress", sum(1 for c in all_complaints if c["status"] == "In Progress"))
-            m4.metric("Resolved/Closed", sum(1 for c in all_complaints if c["status"] in ("Resolved", "Closed")))
+
+            m1.metric(
+                "🔴 SLA Breached",
+                sla_counts.get("Breached", 0)
+            )
+
+            m2.metric(
+                "🟠 Due Soon",
+                sla_counts.get("Due Soon", 0)
+            )
+
+            m3.metric(
+                "🟡 Pending",
+                pending_count
+            )
+
+            m4.metric(
+                "🟢 Resolved",
+                sum(
+                    1 for c in all_complaints
+                    if c["status"] in ("Resolved", "Closed")
+                )
+            )
+
             st.divider()
 
             for c in complaints:
@@ -582,9 +612,9 @@ elif page == "🔐 Admin / Officer Login":
                     st.write(f"**सारांश:** {c['summary']}")
 
                     # =================================================
-                    # PHASE 1 — Department + SLA Information
+                    # PHASE 1 — Department + Priority + Officer + SLA
                     # =================================================
-                    d1, d2, d3 = st.columns(3)
+                    d1, d2, d3, d4 = st.columns(4)
 
                     with d1:
                         st.metric(
@@ -593,17 +623,34 @@ elif page == "🔐 Admin / Officer Login":
                         )
 
                     with d2:
+                        priority = c.get("priority") or c.get("urgency") or "Medium"
+                        priority_icon = {
+                            "High": "🔴",
+                            "Medium": "🟠",
+                            "Low": "🟢"
+                        }.get(priority, "⚪")
+
+                        st.metric(
+                            "🎯 Priority",
+                            f"{priority_icon} {priority}"
+                        )
+
+                    with d3:
+                        assigned_officer = (
+                            c.get("assigned_officer")
+                            or c.get("assigned_to")
+                        )
+
+                        st.metric(
+                            "👤 Assigned Officer",
+                            assigned_officer or "Not Assigned"
+                        )
+
+                    with d4:
                         sla_hours = c.get("sla_hours")
                         st.metric(
                             "⏱️ SLA",
                             f"{sla_hours} घंटे" if sla_hours else "N/A"
-                        )
-
-                    with d3:
-                        assigned = c.get("assigned_to")
-                        st.metric(
-                            "👤 Assigned Officer",
-                            assigned or "Not Assigned"
                         )
 
                     if c.get("sla_deadline"):
@@ -681,7 +728,7 @@ elif page == "🔐 Admin / Officer Login":
                     st.divider()
 
                     # =================================================
-                    # STATUS UPDATE
+                    # PHASE 1 — OFFICER UPDATE
                     # =================================================
                     new_status = st.selectbox(
                         "स्थिति बदलें",
@@ -690,22 +737,90 @@ elif page == "🔐 Admin / Officer Login":
                         key=f"status_{c['id']}"
                     )
 
+                    priority = st.selectbox(
+                        "🎯 Priority",
+                        ["High", "Medium", "Low"],
+                        index=["High", "Medium", "Low"].index(
+                            c.get("priority") or c.get("urgency") or "Medium"
+                        ),
+                        key=f"priority_{c['id']}"
+                    )
+
+                    assigned_officer = st.text_input(
+                        "👤 Assigned Officer",
+                        value=c.get("assigned_officer")
+                        or c.get("assigned_to")
+                        or user["username"],
+                        key=f"officer_{c['id']}"
+                    )
+
                     notes = st.text_area(
-                        "टिप्पणी (citizen को भेजी जाएगी)",
-                        value=c["resolution_notes"] or "",
+                        "टिप्पणी (Citizen को भेजी जाएगी)",
+                        value=c.get("resolution_notes") or "",
                         key=f"notes_{c['id']}"
+                    )
+
+                    resolution_remarks = st.text_area(
+                        "📝 Resolution Remarks",
+                        value=c.get("resolution_remarks") or "",
+                        key=f"resolution_remarks_{c['id']}"
+                    )
+
+                    resolution_photo = st.file_uploader(
+                        "📸 Resolution Evidence Photo",
+                        type=["jpg", "jpeg", "png"],
+                        key=f"resolution_photo_{c['id']}"
                     )
 
                     if st.button(
                         "💾 अपडेट करें व Citizen को Notify करें",
                         key=f"upd_{c['id']}"
                     ):
+                        saved_photo = c.get("resolution_photo")
+
+                        if resolution_photo:
+                            os.makedirs("uploads", exist_ok=True)
+
+                            photo_name = (
+                                f"resolution_{c['id']}_"
+                                f"{resolution_photo.name}"
+                            )
+
+                            photo_path = os.path.join(
+                                "uploads",
+                                photo_name
+                            )
+
+                            with open(photo_path, "wb") as f:
+                                f.write(resolution_photo.getbuffer())
+
+                            saved_photo = photo_path
+
                         db.update_status(
                             c["id"],
                             new_status,
-                            notes,
-                            assigned_to=user["username"]
+                            notes=notes,
+                            assigned_officer=assigned_officer,
+                            resolution_remarks=resolution_remarks or None,
+                            resolution_photo=saved_photo
                         )
+
+                        with db.get_conn() as conn:
+                            conn.execute(
+                                """
+                                UPDATE complaints
+                                SET priority = ?,
+                                    updated_at = ?
+                                WHERE id = ?
+                                """,
+                                (
+                                    priority,
+                                    datetime.now().isoformat(
+                                        timespec="seconds"
+                                    ),
+                                    c["id"],
+                                )
+                            )
 
                         updated = db.get_complaint(c["id"])
 
@@ -714,7 +829,7 @@ elif page == "🔐 Admin / Officer Login":
                             updated
                         )
 
-                        st.success("स्थिति अपडेट हो गई।")
+                        st.success("स्थिति और Phase 1 जानकारी अपडेट हो गई।")
                         st.info(msg)
                         st.rerun()
 

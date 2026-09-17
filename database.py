@@ -74,8 +74,16 @@ def create_complaint(**kwargs):
     urgency = kwargs.get("urgency") or "Medium"
     department = kwargs.get("department") or "General"
 
-    sla_hours = calculate_sla_hours(urgency)
-    sla_deadline = calculate_sla_deadline(urgency, now)
+    # Phase 1: priority is separate from the original urgency field.
+    priority = kwargs.get("priority") or urgency
+
+    sla_hours = kwargs.get("sla_hours")
+    if sla_hours is None:
+        sla_hours = calculate_sla_hours(urgency)
+
+    sla_deadline = kwargs.get("sla_deadline")
+    if sla_deadline is None:
+        sla_deadline = calculate_sla_deadline(urgency, now)
 
     with get_conn() as conn:
         conn.execute("""
@@ -83,8 +91,10 @@ def create_complaint(**kwargs):
             (id, village, ward, category, urgency, summary, original_text,
              citizen_name, citizen_phone, latitude, longitude, photo_path, video_path,
              status, resolution_notes, assigned_to, created_at, updated_at,
-             department, sla_hours, sla_deadline, resolved_at)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             department, sla_hours, sla_deadline, resolved_at,
+             assigned_officer, priority, resolution_remarks, resolution_photo,
+             citizen_feedback, citizen_rating, escalation_level)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             cid,
             kwargs.get("village"),
@@ -100,7 +110,7 @@ def create_complaint(**kwargs):
             kwargs.get("photo_path"),
             kwargs.get("video_path"),
             "Submitted",
-            None,
+            kwargs.get("resolution_notes"),
             kwargs.get("assigned_to"),
             now,
             now,
@@ -108,6 +118,13 @@ def create_complaint(**kwargs):
             sla_hours,
             sla_deadline,
             None,
+            kwargs.get("assigned_officer"),
+            priority,
+            kwargs.get("resolution_remarks"),
+            kwargs.get("resolution_photo"),
+            kwargs.get("citizen_feedback"),
+            kwargs.get("citizen_rating"),
+            kwargs.get("escalation_level", 0),
         ))
 
     add_complaint_update(
@@ -115,7 +132,7 @@ def create_complaint(**kwargs):
         "Complaint Registered",
         updated_by="system",
         new_status="Submitted",
-        remarks=f"Department: {department} | SLA: {sla_hours} hours"
+        remarks=f"Department: {department} | Priority: {priority} | SLA: {sla_hours} hours"
     )
 
     return cid
@@ -145,7 +162,15 @@ def get_all_complaints(status_filter=None, village_filter=None, urgency_filter=N
         return [dict(r) for r in rows]
 
 
-def update_status(complaint_id, new_status, notes=None, assigned_to=None):
+def update_status(
+    complaint_id,
+    new_status,
+    notes=None,
+    assigned_to=None,
+    assigned_officer=None,
+    resolution_remarks=None,
+    resolution_photo=None,
+):
     now = datetime.now().isoformat(timespec="seconds")
 
     complaint = get_complaint(complaint_id)
@@ -155,6 +180,13 @@ def update_status(complaint_id, new_status, notes=None, assigned_to=None):
 
     old_status = complaint["status"]
     old_assigned_to = complaint.get("assigned_to")
+    old_assigned_officer = complaint.get("assigned_officer")
+
+    # Keep legacy assigned_to and new assigned_officer compatible.
+    officer = assigned_officer or assigned_to
+
+    # Resolution remarks can come from the new field or old notes argument.
+    remarks = resolution_remarks or notes
 
     with get_conn() as conn:
         conn.execute("""
@@ -162,6 +194,9 @@ def update_status(complaint_id, new_status, notes=None, assigned_to=None):
             SET status = ?,
                 resolution_notes = COALESCE(?, resolution_notes),
                 assigned_to = COALESCE(?, assigned_to),
+                assigned_officer = COALESCE(?, assigned_officer),
+                resolution_remarks = COALESCE(?, resolution_remarks),
+                resolution_photo = COALESCE(?, resolution_photo),
                 resolved_at = CASE
                     WHEN ? IN ("Resolved", "Closed")
                          AND resolved_at IS NULL
@@ -173,41 +208,56 @@ def update_status(complaint_id, new_status, notes=None, assigned_to=None):
         """, (
             new_status,
             notes,
-            assigned_to,
+            assigned_to or officer,
+            officer,
+            resolution_remarks,
+            resolution_photo,
             new_status,
             now,
             now,
             complaint_id,
         ))
 
+    # Timeline: status change
     if old_status != new_status:
         add_complaint_update(
             complaint_id,
             "Status Changed",
-            updated_by=assigned_to or "officer",
+            updated_by=officer or "officer",
             old_status=old_status,
             new_status=new_status,
-            remarks=notes,
+            remarks=remarks,
         )
 
-    if assigned_to and assigned_to != old_assigned_to:
+    # Timeline: officer assignment
+    if officer and officer != (old_assigned_officer or old_assigned_to):
         add_complaint_update(
             complaint_id,
             "Officer Assigned",
-            updated_by=assigned_to,
+            updated_by=officer,
             new_status=new_status,
-            remarks=f"Assigned to: {assigned_to}",
+            remarks=f"Assigned to: {officer}",
         )
 
-    if notes and old_status == new_status:
+    # Timeline: resolution information
+    if resolution_remarks or resolution_photo:
+        add_complaint_update(
+            complaint_id,
+            "Resolution Evidence Added",
+            updated_by=officer or "officer",
+            new_status=new_status,
+            remarks=resolution_remarks or "Resolution photo added",
+        )
+
+    # Timeline: note added without status change
+    if notes and old_status == new_status and not resolution_remarks:
         add_complaint_update(
             complaint_id,
             "Resolution Note Added",
-            updated_by=assigned_to or "officer",
+            updated_by=officer or "officer",
             new_status=new_status,
             remarks=notes,
         )
-
 
 def get_villages():
     with get_conn() as conn:

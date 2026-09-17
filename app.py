@@ -416,6 +416,24 @@ elif page == "🔍 शिकायत ट्रैक करें":
 # PAGE 3 — Admin / Officer login + dashboard
 # =================================================================
 elif page == "🔐 Admin / Officer Login":
+    # =============================================================
+    # PHASE 1 — Automatic SLA Escalation
+    # =============================================================
+    if st.session_state.user:
+        try:
+            escalation_result = db.auto_escalate_complaints()
+
+            if escalation_result:
+                st.info(
+                    f"🚨 {len(escalation_result)} complaint(s) "
+                    "automatically escalated due to SLA breach."
+                )
+
+        except Exception as e:
+            st.warning(
+                f"Automatic SLA escalation load नहीं हो सका: {e}"
+            )
+
     if not st.session_state.user:
         st.header("🔐 Admin / Officer Login")
         st.caption("डिफ़ॉल्ट admin: username `admin`, password `admin123` — पहली बार लॉगिन के बाद बदलें।")
@@ -568,7 +586,9 @@ elif page == "🔐 Admin / Officer Login":
                 if c["status"] not in ("Resolved", "Closed")
             )
 
-            m1, m2, m3, m4 = st.columns(4)
+            escalation_counts = db.get_escalation_counts()
+
+            m1, m2, m3, m4, m5 = st.columns(5)
 
             m1.metric(
                 "🔴 SLA Breached",
@@ -581,11 +601,19 @@ elif page == "🔐 Admin / Officer Login":
             )
 
             m3.metric(
+                "🚨 Escalated",
+                sum(
+                    escalation_counts.get(level, 0)
+                    for level in (1, 2, 3)
+                )
+            )
+
+            m4.metric(
                 "🟡 Pending",
                 pending_count
             )
 
-            m4.metric(
+            m5.metric(
                 "🟢 Resolved",
                 sum(
                     1 for c in all_complaints
@@ -598,12 +626,30 @@ elif page == "🔐 Admin / Officer Login":
             for c in complaints:
                 urg_class = {"High": "grv-high", "Medium": "grv-medium", "Low": "grv-low"}.get(c["urgency"], "")
                 badge = STATUS_BADGE_CLASS.get(c["status"], "badge-Submitted")
+
+                try:
+                    escalation_level = int(c.get("escalation_level") or 0)
+                except (TypeError, ValueError):
+                    escalation_level = 0
+
+                escalation_display = {
+                    0: "⚪ Level 0 — Normal",
+                    1: "🚨 Level 1 — Escalated",
+                    2: "🔥 Level 2 — High Escalation",
+                    3: "🛑 Level 3 — Critical Escalation",
+                }.get(
+                    min(max(escalation_level, 0), 3),
+                    "⚪ Level 0 — Normal"
+                )
+
                 st.markdown(f"""
                 <div class="grv-card {urg_class}">
                     <span class="complaint-id">{c['id']}</span> &nbsp;
                     <b>{c['village']}</b> · {c['category']} · {URGENCY_ICON.get(c['urgency'],'')} {c['urgency']}
                     &nbsp; <span class="badge {badge}">{c['status']}</span>
-                    <br><small>{c['created_at']}</small>
+                    <br>
+                    <small>{c['created_at']}</small>
+                    &nbsp; · &nbsp; <b>{escalation_display}</b>
                 </div>
                 """, unsafe_allow_html=True)
 

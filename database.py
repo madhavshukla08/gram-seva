@@ -439,6 +439,30 @@ def get_sla_counts():
 
     return counts
 
+def get_escalation_counts():
+    """Return complaint counts grouped by escalation level."""
+
+    complaints = get_all_complaints()
+
+    counts = {
+        0: 0,
+        1: 0,
+        2: 0,
+        3: 0,
+    }
+
+    for complaint in complaints:
+        try:
+            level = int(complaint.get("escalation_level") or 0)
+        except (TypeError, ValueError):
+            level = 0
+
+        level = min(max(level, 0), 3)
+        counts[level] += 1
+
+    return counts
+
+
 # ================================================================
 # PHASE 1 — Automatic SLA Escalation
 # ================================================================

@@ -8,7 +8,7 @@ import notifications as notify
 import plotly.express as px
 
 st.set_page_config(
-    page_title="ग्राम सेवा — Admin Portal",
+    page_title="Gram Seva Admin",
     layout="wide",
     page_icon="🔐"
 )

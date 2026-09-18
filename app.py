@@ -148,15 +148,156 @@ CATEGORIES = ["Water Supply", "Electricity", "Roads & Infrastructure", "Sanitati
 # ---------------------------------------------------------------
 with st.sidebar:
     st.header("मेनू")
-    page = st.radio("नेविगेशन", ["📝 शिकायत दर्ज करें", "🔍 शिकायत ट्रैक करें", "🔐 Admin / Officer Login"],
+    page = st.radio("नेविगेशन", ["📝 शिकायत दर्ज करें", "🔍 शिकायत ट्रैक करें"],
                      label_visibility="collapsed")
 
-    st.divider()
-    st.subheader("🔔 Admin Notification Settings")
-    st.session_state.admin_phone = st.text_input("Admin फ़ोन नंबर", value=st.session_state.admin_phone, placeholder="+91XXXXXXXXXX")
-    st.session_state.notify_sms = st.checkbox("SMS", value=st.session_state.notify_sms)
-    st.session_state.notify_whatsapp = st.checkbox("WhatsApp", value=st.session_state.notify_whatsapp)
-    st.caption("Env vars: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_SMS_FROM, TWILIO_WHATSAPP_FROM, TWILIO_VOICE_FROM")
+with st.sidebar:
+    st.markdown("---")
+    st.subheader("🤖 Gram Seva AI Assistant")
+
+    # Photo / poster
+    assistant_img = asset("pm_photo.jpg")
+    if assistant_img:
+        st.image(assistant_img, use_container_width=True)
+
+    intro_text = (
+        "नमस्ते! आपका स्वागत है ग्राम सेवा पोर्टल में। "
+        "ग्राम सेवा एक ग्रामीण शिकायत प्रबंधन प्रोजेक्ट है, "
+        "जिसे माधव शुक्ला द्वारा बनाया गया है। "
+        "इसका उद्देश्य ग्रामीण क्षेत्रों की समस्याओं को दर्ज करने और "
+        "उनकी स्थिति को ट्रैक करने में मदद करना है। "
+        "जैसे पानी की समस्या, जल रिसाव, बिजली, सड़क, सफाई, "
+        "नाली, नदी या अन्य स्थानीय समस्याएँ। "
+        "आप अपनी शिकायत लिखकर या अपनी आवाज़ में दर्ज कर सकते हैं। "
+        "शिकायत जमा करने के बाद आपको एक Complaint ID मिलेगी, "
+        "जिससे आप अपनी शिकायत का status track कर सकते हैं।"
+    )
+
+    # Auto voice introduction
+    import streamlit.components.v1 as components
+
+    voice_html = f"""
+    <div style="font-family:Arial,sans-serif;padding:8px;">
+        <div style="
+            background:#f1f5f9;
+            border-radius:12px;
+            padding:12px;
+            font-size:14px;
+            line-height:1.5;
+        ">
+            <b>🔊 परिचय</b><br>
+            ग्राम सेवा पोर्टल में आपका स्वागत है।
+        </div>
+
+        <button id="speakBtn" style="
+            margin-top:8px;
+            border:0;
+            border-radius:8px;
+            padding:8px 12px;
+            background:#166534;
+            color:white;
+            cursor:pointer;
+        ">🔊 सुनें</button>
+    </div>
+
+    <script>
+    const intro = {intro_text!r};
+
+    function speakIntro() {{
+        if (!("speechSynthesis" in window)) return;
+
+        window.speechSynthesis.cancel();
+
+        const speech = new SpeechSynthesisUtterance(intro);
+        speech.lang = "hi-IN";
+        speech.rate = 0.92;
+        speech.pitch = 1.0;
+        speech.volume = 1.0;
+
+        window.speechSynthesis.speak(speech);
+    }}
+
+    document.getElementById("speakBtn").onclick = speakIntro;
+
+    // Automatically start when the assistant panel loads.
+    setTimeout(speakIntro, 700);
+    </script>
+    """
+
+    components.html(voice_html, height=155, scrolling=False)
+
+    st.caption("Portal के बारे में कोई भी सवाल पूछ सकते हैं।")
+
+    if "ai_messages" not in st.session_state:
+        st.session_state.ai_messages = []
+
+    for msg in st.session_state.ai_messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    ai_prompt = st.chat_input(
+        "Portal के बारे में पूछें...",
+        key="gram_seva_ai_input"
+    )
+
+    if ai_prompt:
+        st.session_state.ai_messages.append({
+            "role": "user",
+            "content": ai_prompt
+        })
+
+        try:
+            from openai import OpenAI
+
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+            response = client.responses.create(
+                model="gpt-4o-mini",
+                instructions="""
+You are the Gram Seva Portal AI Assistant.
+
+Explain the Gram Seva portal clearly and briefly.
+
+The portal is a student-built project by B.Tech student Madhav Shukla.
+It helps citizens understand and submit rural/local complaints such as:
+water supply problems, water leakage, electricity problems, roads,
+sanitation, drainage, river/local environmental problems and other
+local civic issues.
+
+Explain:
+- how to submit a complaint
+- voice complaint
+- complaint ID and tracking
+- village and ward information
+- photo/video evidence
+- GPS/location
+- complaint status
+- SLA and escalation
+- citizen notifications
+- admin/officer dashboard
+
+Answer in Hindi, English or Hinglish according to the user's question.
+
+Do not invent complaint data or status.
+Do not claim that this is an official government website.
+Do not provide fake government schemes, officials, phone numbers or policies.
+If a question is unrelated to the portal, politely say that you can
+help explain the Gram Seva portal and its features.
+""",
+                input=ai_prompt
+            )
+
+            answer = response.output_text
+
+        except Exception as e:
+            answer = f"AI Assistant अभी उपलब्ध नहीं है: {e}"
+
+        st.session_state.ai_messages.append({
+            "role": "assistant",
+            "content": answer
+        })
+
+        st.rerun()
 
 # =================================================================
 # PAGE 1 — Submit complaint
@@ -413,532 +554,7 @@ elif page == "🔍 शिकायत ट्रैक करें":
                 st.video(c["video_path"])
 
 # =================================================================
-# PAGE 3 — Admin / Officer login + dashboard
-# =================================================================
-elif page == "🔐 Admin / Officer Login":
-    # =============================================================
-    # PHASE 1 — Automatic SLA Escalation
-    # =============================================================
-    if st.session_state.user:
-        try:
-            escalation_result = db.auto_escalate_complaints()
-
-            if escalation_result:
-                st.info(
-                    f"🚨 {len(escalation_result)} complaint(s) "
-                    "automatically escalated due to SLA breach."
-                )
-
-        except Exception as e:
-            st.warning(
-                f"Automatic SLA escalation load नहीं हो सका: {e}"
-            )
-
-    if not st.session_state.user:
-        st.header("🔐 Admin / Officer Login")
-        st.caption("डिफ़ॉल्ट admin: username `admin`, password `admin123` — पहली बार लॉगिन के बाद बदलें।")
-        u = st.text_input("Username", key="login_username")
-        p = st.text_input("Password", type="password", key="login_password")
-
-        col_login, col_forgot = st.columns(2)
-
-        with col_login:
-            login_clicked = st.button("Login", type="primary")
-
-        with col_forgot:
-            forgot_clicked = st.button("🔑 Forgot Password?")
-
-        if login_clicked:
-            user = auth.authenticate(u, p)
-            if user:
-                st.session_state.user = user
-                st.rerun()
-            else:
-                st.error("गलत username या password।")
-
-        if forgot_clicked:
-            st.session_state.show_forgot_password = True
-
-        if st.session_state.get("show_forgot_password", False):
-            st.divider()
-            st.subheader("🔑 Forgot Password")
-
-            identifier = st.text_input(
-                "Username या Registered Email",
-                key="forgot_identifier"
-            )
-
-            if st.button("📩 Send OTP", key="send_reset_otp"):
-                if not identifier.strip():
-                    st.warning("Username या email डालें।")
-                else:
-                    try:
-                        ok, message = auth.request_password_reset(identifier)
-
-                        if ok:
-                            st.session_state.reset_otp_sent = True
-                            st.success(message)
-                        else:
-                            st.error(message)
-
-                    except Exception as e:
-                        st.error(f"OTP भेजने में समस्या: {e}")
-
-            if st.session_state.get("reset_otp_sent", False):
-                otp = st.text_input(
-                    "🔢 6-Digit OTP",
-                    max_chars=6,
-                    key="reset_otp"
-                )
-
-                new_password = st.text_input(
-                    "🔐 New Password",
-                    type="password",
-                    key="reset_new_password"
-                )
-
-                confirm_password = st.text_input(
-                    "🔐 Confirm New Password",
-                    type="password",
-                    key="reset_confirm_password"
-                )
-
-                if st.button("✅ Reset Password", key="reset_password"):
-                    if new_password != confirm_password:
-                        st.error("दोनों passwords समान होने चाहिए।")
-                    elif len(new_password) < 8:
-                        st.error("Password कम से कम 8 characters का होना चाहिए।")
-                    else:
-                        ok, message = auth.reset_password(
-                            st.session_state.get("forgot_identifier", ""),
-                            otp,
-                            new_password
-                        )
-
-                        if ok:
-                            st.success(message)
-                            st.session_state.show_forgot_password = False
-                            st.session_state.reset_otp_sent = False
-                            st.info("अब नए password से Login करें।")
-                        else:
-                            st.error(message)
-    else:
-        user = st.session_state.user
-        topc1, topc2 = st.columns([5, 1])
-        with topc1:
-            st.header(f"🖥️ अधिकारी डैशबोर्ड — {user['username']} ({user['role']})")
-        with topc2:
-            if st.button("Logout"):
-                st.session_state.user = None
-                st.rerun()
-
-        # =========================
-        # ADMIN EMAIL SETTINGS
-        # =========================
-        if user["role"] == "admin":
-            with st.expander("⚙️ Admin Email Settings"):
-                current_user = auth.get_user(user["username"])
-                current_email = (
-                    current_user["email"]
-                    if current_user and current_user["email"]
-                    else ""
-                )
-
-                st.caption("Forgot Password OTP इसी registered email पर भेजा जाएगा।")
-
-                new_email = st.text_input(
-                    "📧 Registered Email",
-                    value=current_email,
-                    key="admin_email_setting"
-                )
-
-                if st.button("💾 Save Email", key="save_admin_email"):
-                    new_email = new_email.strip()
-
-                    try:
-                        auth.set_email(user["username"], new_email)
-                        st.success("✅ Admin email successfully updated.")
-                    except ValueError as e:
-                        st.error(str(e))
-                    except Exception as e:
-                        st.error(f"Email save करने में समस्या: {e}")
-
-        tab_list, tab_analytics = st.tabs(["📋 शिकायतें", "📊 Analytics"])
-
-        with tab_list:
-            all_complaints = db.get_all_complaints()
-            villages = ["सभी"] + sorted(set(c["village"] for c in all_complaints)) if all_complaints else ["सभी"]
-
-            f1, f2, f3 = st.columns(3)
-            status_f = f1.selectbox("स्थिति", ["सभी"] + db.STATUS_FLOW)
-            village_f = f2.selectbox("गाँव", villages)
-            urgency_f = f3.selectbox("प्राथमिकता", ["सभी", "High", "Medium", "Low"])
-
-            complaints = db.get_all_complaints(status_f, village_f, urgency_f)
-
-            # =================================================
-            # PHASE 1 — SLA Dashboard Metrics
-            # =================================================
-            sla_counts = db.get_sla_counts()
-
-            pending_count = sum(
-                1 for c in all_complaints
-                if c["status"] not in ("Resolved", "Closed")
-            )
-
-            escalation_counts = db.get_escalation_counts()
-
-            m1, m2, m3, m4, m5 = st.columns(5)
-
-            m1.metric(
-                "🔴 SLA Breached",
-                sla_counts.get("Breached", 0)
-            )
-
-            m2.metric(
-                "🟠 Due Soon",
-                sla_counts.get("Due Soon", 0)
-            )
-
-            m3.metric(
-                "🚨 Escalated",
-                sum(
-                    escalation_counts.get(level, 0)
-                    for level in (1, 2, 3)
-                )
-            )
-
-            m4.metric(
-                "🟡 Pending",
-                pending_count
-            )
-
-            m5.metric(
-                "🟢 Resolved",
-                sum(
-                    1 for c in all_complaints
-                    if c["status"] in ("Resolved", "Closed")
-                )
-            )
-
-            # =================================================
-            # PHASE 1 — Escalation Level Breakdown
-            # =================================================
-            e1, e2, e3 = st.columns(3)
-
-            e1.metric(
-                "🚨 Level 1",
-                escalation_counts.get(1, 0)
-            )
-
-            e2.metric(
-                "🔥 Level 2",
-                escalation_counts.get(2, 0)
-            )
-
-            e3.metric(
-                "🛑 Level 3",
-                escalation_counts.get(3, 0)
-            )
-
-            st.divider()
-
-            for c in complaints:
-                urg_class = {"High": "grv-high", "Medium": "grv-medium", "Low": "grv-low"}.get(c["urgency"], "")
-                badge = STATUS_BADGE_CLASS.get(c["status"], "badge-Submitted")
-
-                try:
-                    escalation_level = int(c.get("escalation_level") or 0)
-                except (TypeError, ValueError):
-                    escalation_level = 0
-
-                escalation_display = {
-                    0: "⚪ Level 0 — Normal",
-                    1: "🚨 Level 1 — Escalated",
-                    2: "🔥 Level 2 — High Escalation",
-                    3: "🛑 Level 3 — Critical Escalation",
-                }.get(
-                    min(max(escalation_level, 0), 3),
-                    "⚪ Level 0 — Normal"
-                )
-
-                st.markdown(f"""
-                <div class="grv-card {urg_class}">
-                    <span class="complaint-id">{c['id']}</span> &nbsp;
-                    <b>{c['village']}</b> · {c['category']} · {URGENCY_ICON.get(c['urgency'],'')} {c['urgency']}
-                    &nbsp; <span class="badge {badge}">{c['status']}</span>
-                    <br>
-                    <small>{c['created_at']}</small>
-                    &nbsp; · &nbsp; <b>{escalation_display}</b>
-                </div>
-                """, unsafe_allow_html=True)
-
-                with st.expander("विवरण / Update status"):
-                    st.write(f"**मूल शिकायत:** {c['original_text']}")
-                    st.write(f"**सारांश:** {c['summary']}")
-
-                    # =================================================
-                    # PHASE 1 — Department + Priority + Officer + SLA
-                    # =================================================
-                    d1, d2, d3, d4 = st.columns(4)
-
-                    with d1:
-                        st.metric(
-                            "🏢 विभाग",
-                            c.get("department") or "General"
-                        )
-
-                    with d2:
-                        priority = c.get("priority") or c.get("urgency") or "Medium"
-                        priority_icon = {
-                            "High": "🔴",
-                            "Medium": "🟠",
-                            "Low": "🟢"
-                        }.get(priority, "⚪")
-
-                        st.metric(
-                            "🎯 Priority",
-                            f"{priority_icon} {priority}"
-                        )
-
-                    with d3:
-                        assigned_officer = (
-                            c.get("assigned_officer")
-                            or c.get("assigned_to")
-                        )
-
-                        st.metric(
-                            "👤 Assigned Officer",
-                            assigned_officer or "Not Assigned"
-                        )
-
-                    with d4:
-                        sla_hours = c.get("sla_hours")
-                        st.metric(
-                            "⏱️ SLA",
-                            f"{sla_hours} घंटे" if sla_hours else "N/A"
-                        )
-
-                    if c.get("sla_deadline"):
-                        st.info(
-                            f"📅 **SLA Deadline:** {c['sla_deadline']}"
-                        )
-
-                        # =================================================
-                        # PHASE 1 — Live SLA Status
-                        # =================================================
-                        try:
-                            sla_state = db.get_sla_state(c)
-
-                            sla_display = {
-                                "On Track": "🟢 On Track",
-                                "Due Soon": "🟠 Due Soon",
-                                "Breached": "🔴 Breached",
-                                "Completed": "✅ Completed",
-                                "No SLA": "⚪ No SLA",
-                                "Invalid SLA": "⚠️ Invalid SLA",
-                            }.get(
-                                sla_state,
-                                f"⚪ {sla_state}"
-                            )
-
-                            st.markdown(
-                                f"**SLA Status:** {sla_display}"
-                            )
-
-                        except Exception as e:
-                            st.warning(
-                                f"SLA status load नहीं हो सका: {e}"
-                            )
-
-                    if c["latitude"] and c["longitude"]:
-                        st.map({
-                            "lat": [c["latitude"]],
-                            "lon": [c["longitude"]]
-                        })
-
-                    if c["photo_path"] and os.path.exists(c["photo_path"]):
-                        st.image(c["photo_path"], width=250)
-
-                    if c["video_path"] and os.path.exists(c["video_path"]):
-                        st.video(c["video_path"])
-
-                    # =================================================
-                    # PHASE 1 — Complaint Timeline
-                    # =================================================
-                    st.markdown("### 🕒 Complaint Timeline")
-
-                    try:
-                        timeline = db.get_complaint_updates(c["id"])
-
-                        if timeline:
-                            for event in timeline:
-                                action = event.get("action") or "Update"
-                                remarks = event.get("remarks") or ""
-                                updated_by = event.get("updated_by") or "system"
-                                event_time = event.get("created_at") or ""
-
-                                st.markdown(
-                                    f"""
-                                    **🔹 {action}**  
-                                    `{event_time}` · 👤 {updated_by}  
-                                    {remarks}
-                                    """
-                                )
-                        else:
-                            st.caption("अभी कोई timeline update नहीं है।")
-
-                    except Exception as e:
-                        st.warning(f"Timeline load नहीं हो सकी: {e}")
-
-                    st.divider()
-
-                    # =================================================
-                    # PHASE 1 — OFFICER UPDATE
-                    # =================================================
-                    new_status = st.selectbox(
-                        "स्थिति बदलें",
-                        db.STATUS_FLOW,
-                        index=db.STATUS_FLOW.index(c["status"]),
-                        key=f"status_{c['id']}"
-                    )
-
-                    priority = st.selectbox(
-                        "🎯 Priority",
-                        ["High", "Medium", "Low"],
-                        index=["High", "Medium", "Low"].index(
-                            c.get("priority") or c.get("urgency") or "Medium"
-                        ),
-                        key=f"priority_{c['id']}"
-                    )
-
-                    assigned_officer = st.text_input(
-                        "👤 Assigned Officer",
-                        value=c.get("assigned_officer")
-                        or c.get("assigned_to")
-                        or user["username"],
-                        key=f"officer_{c['id']}"
-                    )
-
-                    notes = st.text_area(
-                        "टिप्पणी (Citizen को भेजी जाएगी)",
-                        value=c.get("resolution_notes") or "",
-                        key=f"notes_{c['id']}"
-                    )
-
-                    resolution_remarks = st.text_area(
-                        "📝 Resolution Remarks",
-                        value=c.get("resolution_remarks") or "",
-                        key=f"resolution_remarks_{c['id']}"
-                    )
-
-                    resolution_photo = st.file_uploader(
-                        "📸 Resolution Evidence Photo",
-                        type=["jpg", "jpeg", "png"],
-                        key=f"resolution_photo_{c['id']}"
-                    )
-
-                    escalation_level = st.selectbox(
-                        "🚨 Escalation Level",
-                        [0, 1, 2, 3],
-                        index=min(
-                            max(int(c.get("escalation_level") or 0), 0),
-                            3
-                        ),
-                        format_func=lambda x: (
-                            "Level 0 — Normal"
-                            if x == 0 else
-                            f"Level {x} — Escalated"
-                        ),
-                        key=f"escalation_{c['id']}"
-                    )
-
-                    if st.button(
-                        "💾 अपडेट करें व Citizen को Notify करें",
-                        key=f"upd_{c['id']}"
-                    ):
-                        saved_photo = c.get("resolution_photo")
-
-                        if resolution_photo:
-                            os.makedirs("uploads", exist_ok=True)
-
-                            photo_name = (
-                                f"resolution_{c['id']}_"
-                                f"{resolution_photo.name}"
-                            )
-
-                            photo_path = os.path.join(
-                                "uploads",
-                                photo_name
-                            )
-
-                            with open(photo_path, "wb") as f:
-                                f.write(resolution_photo.getbuffer())
-
-                            saved_photo = photo_path
-
-                        db.update_status(
-                            c["id"],
-                            new_status,
-                            notes=notes,
-                            assigned_officer=assigned_officer,
-                            resolution_remarks=resolution_remarks or None,
-                            resolution_photo=saved_photo,
-                            escalation_level=escalation_level
-                        )
-
-                        with db.get_conn() as conn:
-                            conn.execute(
-                                """
-                                UPDATE complaints
-                                SET priority = ?,
-                                    updated_at = ?
-                                WHERE id = ?
-                                """,
-                                (
-                                    priority,
-                                    datetime.now().isoformat(
-                                        timespec="seconds"
-                                    ),
-                                    c["id"],
-                                )
-                            )
-
-                        updated = db.get_complaint(c["id"])
-
-                        ok, msg = notify.notify_citizen_status_update(
-                            c["citizen_phone"],
-                            updated
-                        )
-
-                        st.success("स्थिति और Phase 1 जानकारी अपडेट हो गई।")
-                        st.info(msg)
-                        st.rerun()
-
-        with tab_analytics:
-            data = db.get_analytics()
-            if not data["by_category"]:
-                st.info("अभी विश्लेषण के लिए पर्याप्त डेटा नहीं है।")
-            else:
-                a1, a2 = st.columns(2)
-                with a1:
-                    fig = px.pie(data["by_category"], names="category", values="n", title="श्रेणी अनुसार शिकायतें")
-                    st.plotly_chart(fig, use_container_width=True)
-                with a2:
-                    fig = px.bar(data["by_urgency"], x="urgency", y="n", title="प्राथमिकता अनुसार",
-                                 color="urgency", color_discrete_map={"High": "#e63946", "Medium": "#f4a300", "Low": "#2a9d8f"})
-                    st.plotly_chart(fig, use_container_width=True)
-
-                a3, a4 = st.columns(2)
-                with a3:
-                    fig = px.bar(data["by_village"], x="village", y="n", title="गाँव अनुसार (शीर्ष 10)")
-                    st.plotly_chart(fig, use_container_width=True)
-                with a4:
-                    fig = px.bar(data["by_status"], x="status", y="n", title="स्थिति अनुसार")
-                    st.plotly_chart(fig, use_container_width=True)
-
-                fig = px.line(data["daily"], x="day", y="n", title="दैनिक शिकायत ट्रेंड", markers=True)
-                st.plotly_chart(fig, use_container_width=True)
+# Admin / Officer Portal has been separated into admin_app.py
 
 st.markdown("""
 <footer style="text-align:center; color:#666; font-size:0.8rem; margin-top:2rem; padding:1rem;">

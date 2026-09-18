@@ -138,6 +138,35 @@ def create_complaint(**kwargs):
     return cid
 
 
+
+def delete_complaint(complaint_id):
+    """Permanently delete a resolved/closed complaint and its timeline."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT status FROM complaints WHERE id = ?",
+            (complaint_id,)
+        ).fetchone()
+
+        if not row:
+            return False, "Complaint नहीं मिली।"
+
+        status = row["status"]
+
+        if status not in ("Resolved", "Closed"):
+            return False, "केवल Resolved या Closed complaint delete की जा सकती है।"
+
+        conn.execute(
+            "DELETE FROM complaint_updates WHERE complaint_id = ?",
+            (complaint_id,)
+        )
+
+        conn.execute(
+            "DELETE FROM complaints WHERE id = ?",
+            (complaint_id,)
+        )
+
+    return True, "Complaint successfully deleted."
+
 def get_complaint(complaint_id):
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM complaints WHERE id = ?", (complaint_id,)).fetchone()
@@ -269,23 +298,73 @@ def get_villages():
 
 
 def get_analytics():
-    """Returns dicts ready for charting: category counts, urgency counts, status counts, daily trend."""
+    """Returns clean chart-ready analytics data."""
+
     with get_conn() as conn:
         by_category = conn.execute(
-            "SELECT category, COUNT(*) as n FROM complaints GROUP BY category"
+            """
+            SELECT
+                COALESCE(NULLIF(TRIM(category), ''), 'Other') AS category,
+                COUNT(*) AS n
+            FROM complaints
+            GROUP BY COALESCE(NULLIF(TRIM(category), ''), 'Other')
+            ORDER BY n DESC
+            """
         ).fetchall()
+
         by_urgency = conn.execute(
-            "SELECT urgency, COUNT(*) as n FROM complaints GROUP BY urgency"
+            """
+            SELECT
+                COALESCE(NULLIF(TRIM(urgency), ''), 'Medium') AS urgency,
+                COUNT(*) AS n
+            FROM complaints
+            GROUP BY COALESCE(NULLIF(TRIM(urgency), ''), 'Medium')
+            ORDER BY
+                CASE COALESCE(NULLIF(TRIM(urgency), ''), 'Medium')
+                    WHEN 'High' THEN 1
+                    WHEN 'Medium' THEN 2
+                    WHEN 'Low' THEN 3
+                    ELSE 4
+                END
+            """
         ).fetchall()
+
         by_status = conn.execute(
-            "SELECT status, COUNT(*) as n FROM complaints GROUP BY status"
+            """
+            SELECT
+                COALESCE(NULLIF(TRIM(status), ''), 'Submitted') AS status,
+                COUNT(*) AS n
+            FROM complaints
+            GROUP BY COALESCE(NULLIF(TRIM(status), ''), 'Submitted')
+            ORDER BY n DESC
+            """
         ).fetchall()
+
         by_village = conn.execute(
-            "SELECT village, COUNT(*) as n FROM complaints GROUP BY village ORDER BY n DESC LIMIT 10"
+            """
+            SELECT
+                COALESCE(NULLIF(TRIM(village), ''), 'Unknown Village') AS village,
+                COUNT(*) AS n
+            FROM complaints
+            GROUP BY COALESCE(NULLIF(TRIM(village), ''), 'Unknown Village')
+            ORDER BY n DESC
+            LIMIT 10
+            """
         ).fetchall()
+
         daily = conn.execute(
-            "SELECT substr(created_at,1,10) as day, COUNT(*) as n FROM complaints GROUP BY day ORDER BY day"
+            """
+            SELECT
+                substr(created_at, 1, 10) AS day,
+                COUNT(*) AS n
+            FROM complaints
+            WHERE created_at IS NOT NULL
+              AND TRIM(created_at) != ''
+            GROUP BY day
+            ORDER BY day
+            """
         ).fetchall()
+
     return {
         "by_category": [dict(r) for r in by_category],
         "by_urgency": [dict(r) for r in by_urgency],

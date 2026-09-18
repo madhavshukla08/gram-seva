@@ -77,6 +77,111 @@ def _init_otp_table():
 _init_otp_table()
 
 
+# ============================================================
+# LOGIN SECURITY — FAILED ATTEMPTS + TEMPORARY LOCK
+# ============================================================
+
+def _init_login_security_table():
+    with get_conn() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS login_security (
+                username TEXT PRIMARY KEY,
+                failed_attempts INTEGER NOT NULL DEFAULT 0,
+                locked_until TEXT
+            )
+        """)
+
+
+_init_login_security_table()
+
+
+MAX_LOGIN_ATTEMPTS = 5
+LOCKOUT_MINUTES = 5
+
+
+def _get_login_security(username):
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT failed_attempts, locked_until
+            FROM login_security
+            WHERE username = ?
+            """,
+            (username,)
+        ).fetchone()
+
+    if not row:
+        return 0, None
+
+    return (
+        int(row["failed_attempts"] or 0),
+        row["locked_until"]
+    )
+
+
+def _record_failed_login(username):
+    now = datetime.now()
+
+    failed_attempts, _ = _get_login_security(username)
+    failed_attempts += 1
+
+    locked_until = None
+
+    if failed_attempts >= MAX_LOGIN_ATTEMPTS:
+        locked_until = (
+            now + timedelta(minutes=LOCKOUT_MINUTES)
+        ).isoformat(timespec="seconds")
+
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO login_security
+                (username, failed_attempts, locked_until)
+            VALUES (?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET
+                failed_attempts = excluded.failed_attempts,
+                locked_until = excluded.locked_until
+            """,
+            (
+                username,
+                failed_attempts,
+                locked_until
+            )
+        )
+
+
+def _reset_failed_logins(username):
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE login_security
+            SET failed_attempts = 0,
+                locked_until = NULL
+            WHERE username = ?
+            """,
+            (username,)
+        )
+
+
+def _is_login_locked(username):
+    failed_attempts, locked_until = _get_login_security(username)
+
+    if not locked_until:
+        return False
+
+    try:
+        lock_time = datetime.fromisoformat(locked_until)
+    except (TypeError, ValueError):
+        return False
+
+    if datetime.now() < lock_time:
+        return True
+
+    # Lock expired — reset automatically
+    _reset_failed_logins(username)
+    return False
+
+
 def create_user(username, password, role="officer", phone=None, email=None):
     pw_hash = _make_password_hash(password)
     now = datetime.now().isoformat(timespec="seconds")
@@ -93,18 +198,33 @@ def create_user(username, password, role="officer", phone=None, email=None):
 
 
 def authenticate(username, password):
+    username = (username or "").strip()
+
+    if not username or not password:
+        return None
+
+    # Check whether this account is temporarily locked
+    if _is_login_locked(username):
+        return None
+
     with get_conn() as conn:
         row = conn.execute(
             "SELECT * FROM users WHERE username = ?",
             (username,)
         ).fetchone()
 
+    # Do not reveal whether username exists
     if not row:
         return None
 
-    salt, stored_hash = row["password_hash"].split("$")
+    try:
+        salt, stored_hash = row["password_hash"].split("$", 1)
+    except (ValueError, AttributeError):
+        return None
 
     if _hash(password, salt) == stored_hash:
+        _reset_failed_logins(username)
+
         return {
             "username": row["username"],
             "role": row["role"],
@@ -112,8 +232,10 @@ def authenticate(username, password):
             "email": row["email"] if "email" in row.keys() else None,
         }
 
-    return None
+    # Wrong password
+    _record_failed_login(username)
 
+    return None
 
 def get_user(username):
     with get_conn() as conn:
